@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using Xunit;
 
 using static Microsoft.JavaScript.NodeApi.Test.TestBuilder;
@@ -50,6 +51,7 @@ public class NativeAotTests
 
             if (moduleFilePath != null)
             {
+                AssertExportsModuleApiVersion(moduleFilePath);
                 BuildTestModuleTypeScript(moduleName);
             }
         }
@@ -67,6 +69,17 @@ public class NativeAotTests
         {
             [ModulePathEnvironmentVariableName] = moduleFilePath,
         });
+    }
+
+    // The generated module declares its Node-API version (ModuleGenerator.ModuleApiVersion) so
+    // hosts such as Node.js and Bun do not have to assume it. Only the export is checked: the
+    // NativeAOT library stays loaded but its runtime is never started here.
+    private static void AssertExportsModuleApiVersion(string moduleFilePath)
+    {
+        nint handle = NativeLibrary.Load(moduleFilePath);
+        Assert.True(
+            NativeLibrary.TryGetExport(handle, "node_api_module_get_api_version_v1", out _),
+            "node_api_module_get_api_version_v1 is not exported by " + moduleFilePath);
     }
 
     private static string? BuildTestModuleCSharp(

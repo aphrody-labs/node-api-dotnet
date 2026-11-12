@@ -33,10 +33,18 @@
     </PropertyGroup>
   </Target>
 
+  <!-- .NET 11 ILCompiler (Microsoft.NETCore.Native.Publish.targets) publishes the native binary
+  and its symbols as ordinary ResolvedFileToPublish items: _CopyAotSymbols and
+  PublishManagedAssembly are gone and CopyNativeBinary is an empty back-compat target that runs
+  after Publish. Depend on _CopyAotSymbols only for older target frameworks. -->
+  <PropertyGroup>
+    <_NodeApiCopyAotSymbolsTarget Condition=" '$(TargetFramework)' != '' and !$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net11.0')) ">_CopyAotSymbols</_NodeApiCopyAotSymbolsTarget>
+  </PropertyGroup>
+
   <Target Name="RenameToDotNode"
     AfterTargets="CopyNativeBinary"
     BeforeTargets="PublishManagedAssembly"
-    DependsOnTargets="_CopyAotSymbols"
+    DependsOnTargets="$(_NodeApiCopyAotSymbolsTarget)"
     Condition=" '$(PublishNodeModule)' == 'true' "
   >
     <!-- If publishing a node module for for multiple platforms, use an rid-specific subdir. -->

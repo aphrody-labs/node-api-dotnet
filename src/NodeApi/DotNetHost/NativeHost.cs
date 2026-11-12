@@ -181,6 +181,18 @@ internal unsafe partial class NativeHost : IDisposable
     [LibraryImport("/usr/lib/libSystem.B.dylib", EntryPoint = "dlopen")]
     private static partial nint DlOpenLibSystem(nint filename, int flags);
 
+    /// <summary>
+    /// Declares the Node-API version this host module targets. Hosts read
+    /// <c>node_api_module_get_api_version_v1</c> before <c>napi_register_module_v1</c> and
+    /// assume 8 when it is absent (Node.js NODE_API_DEFAULT_MODULE_API_VERSION, Bun
+    /// BunProcess.cpp); 8 is declared explicitly so the contract is visible and loads on
+    /// every supported Node.js. Matches <c>NodeEmbedding.NodeApiVersion</c>.
+    /// </summary>
+    [UnmanagedCallersOnly(
+        EntryPoint = "node_api_module_get_api_version_v1",
+        CallConvs = new[] { typeof(CallConvCdecl) })]
+    public static int GetModuleApiVersion() => 8;
+
     [UnmanagedCallersOnly(
         EntryPoint = nameof(napi_register_module_v1),
         CallConvs = new[] { typeof(CallConvCdecl) })]

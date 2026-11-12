@@ -168,7 +168,7 @@ public class JSProjectTests
         {
             nodeArgs += " -p " + tsConfigFile;
         }
-        var nodeStartInfo = new ProcessStartInfo("node", nodeArgs)
+        var nodeStartInfo = new ProcessStartInfo(JSRuntimeExe, nodeArgs)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -177,7 +177,7 @@ public class JSProjectTests
         };
 
         logWriter.WriteLine();
-        logWriter.WriteLine("node " + nodeArgs);
+        logWriter.WriteLine(JSRuntimeExe + " " + nodeArgs);
 
         Process nodeProcess = Process.Start(nodeStartInfo)!;
         errorOutput = LogOutput(nodeProcess, logWriter);

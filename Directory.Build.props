@@ -2,11 +2,14 @@
   <PropertyGroup>
     <IsDotNet10SdkAvailable Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(MSBuildVersion)', '17.15'))">true</IsDotNet10SdkAvailable>
     <AotTargetFramework Condition="'$(IsDotNet10SdkAvailable)' != 'true'">net9.0</AotTargetFramework>
-    <AotTargetFramework Condition="'$(IsDotNet10SdkAvailable)' == 'true'">net10.0</AotTargetFramework>
+    <IsDotNet11SdkAvailable Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '11.0'))">true</IsDotNet11SdkAvailable>
+    <AotTargetFramework Condition="'$(IsDotNet10SdkAvailable)' == 'true' And '$(IsDotNet11SdkAvailable)' != 'true'">net10.0</AotTargetFramework>
+    <AotTargetFramework Condition="'$(IsDotNet11SdkAvailable)' == 'true'">net11.0</AotTargetFramework>
   </PropertyGroup>
   <PropertyGroup Condition="'$(TargetFramework)' == ''">
     <TargetFrameworks>net9.0;net8.0;netstandard2.0</TargetFrameworks>
     <TargetFrameworks Condition="'$(IsDotNet10SdkAvailable)' == 'true'">net10.0;$(TargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IsDotNet11SdkAvailable)' == 'true'">net11.0;$(TargetFrameworks)</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOsPlatform('Windows'))">$(TargetFrameworks);net472</TargetFrameworks>
     <TargetFrameworks Condition="'$(PublishAot)' == 'true'">$(AotTargetFramework)</TargetFrameworks>
   </PropertyGroup>

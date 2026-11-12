@@ -18,7 +18,7 @@ jobs:
     strategy:
       matrix: # This must be kept in sync with the PR build matrix.
         os: [ windows-latest, macos-latest, ubuntu-latest ]
-        dotnet-version: [ net472, net8.0, net9.0, net10.0]
+        dotnet-version: [ net472, net8.0, net9.0, net10.0, net11.0 ]
         node-version: [ 18.x, 22.x ]
         configuration: [ Release ]
         exclude:

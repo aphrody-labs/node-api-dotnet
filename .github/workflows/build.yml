@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ windows-latest, macos-latest, ubuntu-latest ]
-        dotnet-version: [ net472, net8.0, net9.0, net10.0]
+        dotnet-version: [ net472, net8.0, net9.0, net10.0, net11.0 ]
         node-version: [ 18.x, 22.x ]
         configuration: [ Release ]
         exclude:
@@ -53,6 +53,11 @@ jobs:
       with:
         dotnet-version: 10.0.x
 
+    - name: Setup .NET 11
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: 11.0.x
+
     - name: Setup Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
@@ -69,7 +74,7 @@ jobs:
     #      limit-access-to-actor: true
 
     - name: Upload build artifacts
-      if: matrix.dotnet-version == 'net10.0' && matrix.node-version == '22.x'
+      if: matrix.dotnet-version == 'net11.0' && matrix.node-version == '22.x'
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ matrix.os }}-${{ matrix.configuration }}-packages
@@ -100,3 +105,65 @@ jobs:
     - name: Check formatting
       if: ${{ !cancelled() }} # Run this step even when there are build failures but not when cancelled
       run: dotnet format --no-restore --severity info --verbosity detailed --verify-no-changes
+
+  # Node-API host compatibility lane: the same test suite with Bun as the
+  # JavaScript runtime (TestBuilder.JSRuntimeExe reads NODE_API_TEST_RUNTIME).
+  # Node.js is still installed for `npm install` in the project test cases.
+  test-bun:
+    strategy:
+      matrix:
+        os: [ windows-latest, macos-latest, ubuntu-latest ]
+        dotnet-version: [ net11.0 ]
+        configuration: [ Release ]
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0 # Deep clone is required for versioning on git commit height
+
+    - name: Setup .NET 8, 9, 10, 11
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: |
+          8.0.x
+          9.0.x
+          10.0.x
+          11.0.x
+
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 22.x
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: latest
+
+    - name: Build packages
+      id: pack
+      run: dotnet pack --configuration ${{ matrix.configuration }}
+
+    - name: Test (Bun)
+      if: steps.pack.conclusion == 'success' && !cancelled()
+      env:
+        TRACE_NODE_API_HOST: 1
+        NODE_API_TEST_RUNTIME: bun
+      run: >
+        dotnet test -f ${{ matrix.dotnet-version }}
+        --configuration ${{ matrix.configuration }}
+        --logger trx
+        --results-directory "out/test/${{matrix.dotnet-version}}-bun-${{matrix.configuration}}"
+      continue-on-error: true
+
+    - name: Upload test logs
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: test-logs-${{ matrix.os }}-${{matrix.dotnet-version}}-bun-${{matrix.configuration}}
+        path: |
+          out/obj/${{ matrix.configuration }}/**/*.log
+          out/obj/${{ matrix.configuration }}/**/*.rsp
+          out/test/**/*.trx

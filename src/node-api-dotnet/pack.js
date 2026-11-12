@@ -22,7 +22,9 @@ const assemblyName = 'Microsoft.JavaScript.NodeApi';
 
 const targetFrameworks = ['net9.0', 'net8.0'];
 const dotnetGlobalJson = require('../../global.json');
-if (dotnetGlobalJson.sdk.version.startsWith('10.')) targetFrameworks.unshift('net10.0');
+const dotnetSdkMajorVersion = parseInt(dotnetGlobalJson.sdk.version.split('.')[0], 10);
+if (dotnetSdkMajorVersion >= 10) targetFrameworks.unshift('net10.0');
+if (dotnetSdkMajorVersion >= 11) targetFrameworks.unshift('net11.0');
 if (process.platform === 'win32') targetFrameworks.push('net472');
 
 const fs = require('fs');

@@ -7,7 +7,9 @@
 
         <IsDotNet10SdkAvailable Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(MSBuildVersion)', '17.15'))">true</IsDotNet10SdkAvailable>
         <AotTargetFramework Condition="'$(IsDotNet10SdkAvailable)' != 'true'">net9.0</AotTargetFramework>
-        <AotTargetFramework Condition="'$(IsDotNet10SdkAvailable)' == 'true'">net10.0</AotTargetFramework>
+        <IsDotNet11SdkAvailable Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '11.0'))">true</IsDotNet11SdkAvailable>
+        <AotTargetFramework Condition="'$(IsDotNet10SdkAvailable)' == 'true' And '$(IsDotNet11SdkAvailable)' != 'true'">net10.0</AotTargetFramework>
+        <AotTargetFramework Condition="'$(IsDotNet11SdkAvailable)' == 'true'">net11.0</AotTargetFramework>
 
         <Nullable>enable</Nullable>
         <Configuration Condition="'$(Configuration)'==''">Debug</Configuration>

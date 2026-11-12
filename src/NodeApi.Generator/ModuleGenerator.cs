@@ -25,6 +25,16 @@ public class ModuleGenerator : SourceGenerator, ISourceGenerator
     private const string ModuleInitializerClassName = "Module";
     private const string ModuleInitializeMethodName = "Initialize";
     private const string ModuleRegisterFunctionName = "napi_register_module_v1";
+    private const string ModuleGetApiVersionFunctionName = "node_api_module_get_api_version_v1";
+
+    /// <summary>
+    /// Node-API version reported by generated AOT modules through
+    /// <c>node_api_module_get_api_version_v1</c>. Kept at 8, the version hosts assume for a
+    /// module without the export (Node.js NODE_API_DEFAULT_MODULE_API_VERSION, Bun
+    /// BunProcess.cpp), so declaring it changes no runtime behavior and loads on every
+    /// supported Node.js. Matches <c>NodeEmbedding.NodeApiVersion</c>.
+    /// </summary>
+    internal const int ModuleApiVersion = 8;
 
     private readonly JSMarshaller _marshaller = new()
     {
@@ -296,6 +306,9 @@ public class ModuleGenerator : SourceGenerator, ISourceGenerator
         s += $"[UnmanagedCallersOnly(EntryPoint = \"{ModuleRegisterFunctionName}\")]";
         s += $"public static napi_value _{ModuleInitializeMethodName}(napi_env env, napi_value exports)";
         s += $"{s.Indent}=> {ModuleInitializeMethodName}(env, exports);";
+        s++;
+        s += $"[UnmanagedCallersOnly(EntryPoint = \"{ModuleGetApiVersionFunctionName}\")]";
+        s += $"public static int _GetApiVersion() => {ModuleApiVersion};";
         s += "#endif";
         s++;
 

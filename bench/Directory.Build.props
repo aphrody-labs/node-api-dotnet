@@ -3,8 +3,10 @@
   because Benchmark.NET does not like the build output paths to be redirected. -->
   <PropertyGroup Condition="'$(TargetFramework)' == ''">
     <IsDotNet10SdkAvailable Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(MSBuildVersion)', '17.15'))">true</IsDotNet10SdkAvailable>
+    <IsDotNet11SdkAvailable Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '11.0'))">true</IsDotNet11SdkAvailable>
     <TargetFrameworks>net9.0;net8.0;netstandard2.0</TargetFrameworks>
     <TargetFrameworks Condition="'$(IsDotNet10SdkAvailable)' == 'true'">net10.0;$(TargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks Condition="'$(IsDotNet11SdkAvailable)' == 'true'">net11.0;$(TargetFrameworks)</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOsPlatform('Windows'))">$(TargetFrameworks);net472</TargetFrameworks>
   </PropertyGroup>
   <PropertyGroup>

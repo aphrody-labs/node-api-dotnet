@@ -296,6 +296,15 @@ internal static class TestBuilder
         File.WriteAllText(projectDirGlobalJsonFilePath, globalJson);
     }
 
+    /// <summary>
+    /// JavaScript runtime executable for test cases: <c>NODE_API_TEST_RUNTIME</c> (for example
+    /// <c>bun</c>, or a path) when set, else <c>node</c>. Both resolve through the current PATH.
+    /// </summary>
+    public static string JSRuntimeExe { get; } =
+        Environment.GetEnvironmentVariable("NODE_API_TEST_RUNTIME") is { Length: > 0 } runtime
+            ? runtime
+            : "node";
+
     public static void RunNodeTestCase(
         string jsFilePath,
         string logFilePath,
@@ -303,8 +312,8 @@ internal static class TestBuilder
     {
         Assert.True(File.Exists(jsFilePath), "JS file not found: " + jsFilePath);
 
-        // This assumes the `node` executable is on the current PATH.
-        string nodeExe = "node";
+        // This assumes the runtime executable (`node` by default) is on the current PATH.
+        string nodeExe = JSRuntimeExe;
 
         using StreamWriter logWriter = new(File.Open(
             logFilePath, FileMode.Create, FileAccess.Write, FileShare.Read));
@@ -332,7 +341,7 @@ internal static class TestBuilder
 
         if (nodeProcess.ExitCode != 0)
         {
-            string failMessage = "Node process exited with code: " + nodeProcess.ExitCode + ". " +
+            string failMessage = $"{nodeExe} process exited with code: " + nodeProcess.ExitCode + ". " +
                 (errorOutput != null ? "\n" + errorOutput + "\n" : string.Empty) +
                 "Full output: " + logFilePath;
 
