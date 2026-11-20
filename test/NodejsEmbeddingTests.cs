@@ -4,6 +4,8 @@
 #pragma warning disable CA1822 // Mark members as static
 
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -48,6 +50,31 @@ public class NodejsEmbeddingTests
         using NodeEmbeddingRuntime runtime = NodeEmbeddingRuntime.Create(NodejsPlatform,
             new NodeEmbeddingRuntimeSettings { MainScript = MainScript });
         runtime.RunEventLoop();
+    }
+
+    [Fact]
+    public void RunEventLoopNoWaitReturnsImmediately()
+    {
+        using NodeEmbeddingRuntime runtime = NodeEmbeddingRuntime.Create(NodejsPlatform,
+            new NodeEmbeddingRuntimeSettings { MainScript = MainScript });
+        using NodeEmbeddingNodeApiScope scope = new(runtime);
+
+        JSValue.RunScript("""
+            globalThis.timerFired = false;
+            setTimeout(() => { globalThis.timerFired = true; }, 3000);
+            """);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        bool alive = runtime.RunEventLoopNoWait();
+        stopwatch.Stop();
+
+        Assert.True(alive);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"RunEventLoopNoWait took {stopwatch.Elapsed}.");
+        Assert.False((bool)JSValue.Global["timerFired"]);
+
+        runtime.RunEventLoop();
+        Assert.True((bool)JSValue.Global["timerFired"]);
     }
 
     [Fact]
@@ -162,6 +189,57 @@ public class NodejsEmbeddingTests
                 "./test-module.mjs", null, esModule: true);
             Assert.Equal(JSValueType.Object, testModule.TypeOf());
             Assert.Equal(JSValueType.Function, testModule["test"].TypeOf());
+            Assert.Equal("test", testModule.CallMethod("test"));
+        });
+
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
+    }
+
+    // Separate runtimes exercise each cache order for both namespaces and named exports.
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(false, "test")]
+    [InlineData(true, "test")]
+    public async Task ImportEsmViaRequireAndImport(bool importFirst, string? property)
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateNodeEmbeddingThreadRuntime();
+
+        await nodejs.RunAsync(async () =>
+        {
+            async Task LoadModule(bool esModule)
+            {
+                JSValue value = nodejs.Import("./test-module.mjs", property, esModule);
+                Assert.Equal(esModule, value.IsPromise());
+                value = esModule ? await ((JSPromise)value).AsTask() : value;
+                Assert.Equal(
+                    property == null ? JSValueType.Object : JSValueType.Function, value.TypeOf());
+                Assert.Equal("test", property == null ? value.CallMethod("test") : value.Call());
+            }
+
+            await LoadModule(esModule: importFirst);
+            await LoadModule(esModule: !importFirst);
+        });
+
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
+    }
+
+    [Fact]
+    public async Task ImportTopLevelAwaitRequiresAsyncImport()
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateNodeEmbeddingThreadRuntime();
+
+        await nodejs.RunAsync(async () =>
+        {
+            JSException exception = Assert.Throws<JSException>(
+                () => nodejs.Import("./test-tla-module.mjs"));
+            Assert.NotNull(exception.Error);
+            Assert.Equal("ERR_REQUIRE_ASYNC_MODULE", (string)exception.Error.Value.Value["code"]);
+
+            JSValue testModule = await nodejs.ImportAsync("./test-tla-module.mjs", esModule: true);
+            Assert.Equal(JSValueType.Object, testModule.TypeOf());
             Assert.Equal("test", testModule.CallMethod("test"));
         });
 
@@ -286,6 +364,210 @@ public class NodejsEmbeddingTests
                 """);
             Assert.Equal(message, (string)result);
         });
+    }
+
+    [Theory]
+    [InlineData("Error", null)]
+    [InlineData("Error", "ERR_TEST")]
+    [InlineData("TypeError", null)]
+    [InlineData("TypeError", "ERR_TEST")]
+    [InlineData("RangeError", null)]
+    [InlineData("RangeError", "ERR_TEST")]
+    [InlineData("SyntaxError", null)]
+    [InlineData("SyntaxError", "ERR_TEST")]
+    public void ThrowTypedError(string errorType, string? code)
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateNodeEmbeddingThreadRuntime();
+
+        nodejs.Run(() =>
+        {
+            JSValue.Global.SetProperty("throwError", JSValue.CreateFunction("throwError", (_) =>
+            {
+                Action<string> throwWithoutCode = errorType switch
+                {
+                    "Error" => JSError.ThrowError,
+                    "TypeError" => JSError.ThrowTypeError,
+                    "RangeError" => JSError.ThrowRangeError,
+                    "SyntaxError" => JSError.ThrowSyntaxError,
+                    _ => throw new ArgumentOutOfRangeException(nameof(errorType)),
+                };
+                Action<string, string> throwWithCode = errorType switch
+                {
+                    "Error" => JSError.ThrowError,
+                    "TypeError" => JSError.ThrowTypeError,
+                    "RangeError" => JSError.ThrowRangeError,
+                    "SyntaxError" => JSError.ThrowSyntaxError,
+                    _ => throw new ArgumentOutOfRangeException(nameof(errorType)),
+                };
+
+                if (code == null) throwWithoutCode("test");
+                else throwWithCode(code, "test");
+                return JSValue.Undefined;
+            }));
+
+            JSValue error = JSValue.RunScript("""
+                (() => {
+                    try { throwError(); } catch (e) { return e; }
+                    return null;
+                })()
+                """);
+            Assert.True(error.IsObject());
+            Assert.Equal(errorType, (string)error["name"]);
+            Assert.True((bool)JSValue.RunScript(
+                $"(e) => e instanceof {errorType}").Call(JSValue.Undefined, error));
+            Assert.Equal("test", (string)error["message"]);
+            if (code == null) Assert.True(error["code"].IsUndefined());
+            else Assert.Equal(code, (string)error["code"]);
+        });
+    }
+
+    private static NodeEmbeddingThreadRuntime CreateRuntimeWithLinkedModule(
+        string mainScript = "",
+        NodeEmbedding.InitializeModuleCallback? onInitialize = null)
+    {
+        NodeEmbeddingModuleInfo linkedModule = new()
+        {
+            Name = "test-linked",
+            NodeApiVersion = NodeEmbedding.NodeApiVersion,
+            OnInitialize = onInitialize ?? ((runtime, moduleName, exports) =>
+            {
+                exports.SetProperty("moduleName", moduleName);
+                exports.SetProperty("add", JSValue.CreateFunction(
+                    "add", (args) => (int)args[0] + (int)args[1]));
+                return exports;
+            }),
+        };
+
+        // Modules are registered on the runtime thread while it is configured, so dirty the
+        // array pool lazily from there, right before the module name is marshalled.
+        static IEnumerable<NodeEmbeddingModuleInfo> WithGarbageInArrayPool(
+            NodeEmbeddingModuleInfo module)
+        {
+            FillArrayPoolWithGarbage();
+            yield return module;
+        }
+
+        return NodejsPlatform.CreateThreadRuntime(
+            Path.Combine(GetRepoRootDirectory(), "test"),
+            new NodeEmbeddingRuntimeSettings
+            {
+                MainScript = MainScript + mainScript,
+                Modules = WithGarbageInArrayPool(linkedModule),
+            });
+    }
+
+    private static void AssertJSThreadIsUsable(NodeEmbeddingThreadRuntime nodejs)
+    {
+        nodejs.Run(() =>
+        {
+            Assert.Equal(3, (int)JSValue.RunScript("1 + 2"));
+        });
+    }
+
+    [Fact]
+    public void LinkedModuleFromScript()
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateRuntimeWithLinkedModule();
+
+        nodejs.Run(() =>
+        {
+            JSValue linked = JSValue.RunScript("process._linkedBinding('test-linked')");
+            Assert.Equal("test-linked", (string)linked["moduleName"]);
+            Assert.Equal(3, (int)linked.CallMethod("add", 1, 2));
+
+            // The scope that was current before the module was initialized must be restored.
+            Assert.Equal(3, (int)JSValue.RunScript("1 + 2"));
+        });
+
+        AssertJSThreadIsUsable(nodejs);
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
+    }
+
+    [Fact]
+    public void LinkedModuleFromMainScript()
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateRuntimeWithLinkedModule(
+            "globalThis.linked = process._linkedBinding('test-linked');\n");
+
+        nodejs.Run(() =>
+        {
+            Assert.Equal(3, (int)JSValue.RunScript("globalThis.linked.add(1, 2)"));
+        });
+
+        AssertJSThreadIsUsable(nodejs);
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
+    }
+
+    [Fact]
+    public async Task LinkedModuleFromESModule()
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateRuntimeWithLinkedModule();
+
+        int result = await nodejs.RunAsync(async () =>
+        {
+            JSValue testModule = await nodejs.ImportAsync(
+                "./test-linked-module.mjs", null, esModule: true);
+            return (int)testModule["result"];
+        });
+        Assert.Equal(3, result);
+
+        AssertJSThreadIsUsable(nodejs);
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
+    }
+
+    [Fact]
+    public void LinkedModuleFromHandleScope()
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateRuntimeWithLinkedModule();
+
+        nodejs.Run(() =>
+        {
+            using JSValueScope handleScope = new();
+            Assert.Equal(
+                "test-linked",
+                (string)JSValue.RunScript("process._linkedBinding('test-linked').moduleName"));
+        });
+
+        AssertJSThreadIsUsable(nodejs);
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LinkedModuleInitializationError(bool throwJSError)
+    {
+        using NodeEmbeddingThreadRuntime nodejs = CreateRuntimeWithLinkedModule(
+            onInitialize: (runtime, moduleName, exports) =>
+            {
+                if (throwJSError)
+                {
+                    JSError.ThrowError("init failed");
+                    return exports;
+                }
+
+                throw new InvalidOperationException("init failed");
+            });
+
+        nodejs.Run(() =>
+        {
+            // The error must reach the caller of process._linkedBinding().
+            JSValue result = JSValue.RunScript("""
+                (() => {
+                    try { process._linkedBinding('test-linked'); } catch (e) { return e.message; }
+                    return 'not thrown';
+                })()
+                """);
+            Assert.Equal("init failed", (string)result);
+        });
+
+        AssertJSThreadIsUsable(nodejs);
+        nodejs.Dispose();
+        Assert.Equal(0, nodejs.ExitCode);
     }
 
     [Fact]
